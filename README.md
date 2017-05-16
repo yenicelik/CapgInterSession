@@ -1,2 +1,15 @@
-# CapgInterSession
-Implementing the inter-session paper by the chinese (as described here)[http://www.mdpi.com/1424-8220/17/3/458]
+# CapgMyoRemake
+
+An implementation of the Paper [W. Geng et al. 'Gesture recognition by instantaneous surface EMG images.'](http://zju-capg.org/myo/)
+
+## Project structure:
+
+### Top-level-files
+
+
+
+### datahandler
+
+### metrics
+
+
