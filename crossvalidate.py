@@ -1,7 +1,9 @@
 from __future__ import print_function
 
 from misc import *
-from datahandler.OddEvenImporter import OddEvenImporter
+#from datahandler.OddEvenImporter import OddEvenImporter
+from datahandler.InterSessionImporter import InterSessionImporter
+from datahandler.BatchLoader import BatchLoader
 from keras.models import load_model
 from config import *
 from accuracy import *
@@ -12,9 +14,8 @@ import logging
 logging.basicConfig(filename=(RUN_NAME + '.log'), level=logging.DEBUG)
 logging = logging.getLogger(__name__)
 
-def crossvalidate_intrasession(fn_acc):
+def crossvalidate_intrasession():
 
-    importer = OddEvenImporter()
 
     parameter = {
         'LEARNING_RATE': 0.1,
@@ -24,12 +25,16 @@ def crossvalidate_intrasession(fn_acc):
         'LOAD_DIR': "" #"saves/intrasession/model.ckpt" #""
     }
 
-    X_train, y_train, X_test, y_test = importer.get_odd_even()
-    # X_train, y_train, X_cv, y_cv, X_test, y_test = importer.get_train_cv_test(shuffle=False) #do not shuffle this
+    importer = InterSessionImporter()
+
+    X_train, y_train, sid_train,\
+    X_cv, y_cv, sid_cv,\
+    X_test, y_test, sid_test = importer.get_train_cv_test_given_sid(sid=8)
+
     print("X_train: {}".format(X_train.shape))
     print("y_train: {}".format(y_train.shape))
-    # print("X_cv: {}".format(X_cv.shape))
-    # print("y_cv: {}".format(y_cv.shape))
+    print("X_cv: {}".format(X_cv.shape))
+    print("y_cv: {}".format(y_cv.shape))
     print("X_test: {}".format(X_test.shape))
     print("y_test: {}".format(y_test.shape))
 
@@ -54,47 +59,38 @@ def crossvalidate_intrasession(fn_acc):
             logging.info("Epoch {} with lr {:.3f}".format(e, nlr))
             print("Epoch {} with lr {:.3f}".format(e, nlr))
 
-            #shuffle was true before
-
-            ########
             SAMPLES = 100
-            ## TEST_RUN without BATCH
-            history = model.fit(x=[X_train[:SAMPLES * BATCH_SIZE],
-                                   X_train[:SAMPLES * BATCH_SIZE],
-                                   X_train[:SAMPLES * BATCH_SIZE]
-                                   ],
-                                y=[y_train[:SAMPLES * BATCH_SIZE],
-                                   y_train[:SAMPLES * BATCH_SIZE],
-                                   y_train[:SAMPLES * BATCH_SIZE]
-                                   ],
-                                batch_size=BATCH_SIZE, epochs=1, shuffle=True, verbose=0
-                                )
-
-            train_accuracy_nobatch = (history.history['activation_8_acc_1'][-1] + history.history['activation_8_acc_2'][-1] + history.history['activation_8_acc_3'][-1])/3
 
             ########
             ## TEST_RUN with BATCH_RUN
-            #TODO: need to shuffle it!
+
+            batchLoader = BatchLoader(
+                X=X_train,
+                y=y_train,
+                batch_size=BATCH_SIZE,
+                shuffle=True
+            )
 
             train_accuracy_batch = 0.0
 
-            indices = np.arange(X_train.shape[0])
-            np.random.shuffle(indices)
-            X_train = X_train[indices]
-            y_train = y_train[indices]
-            for i in range(SAMPLES):
-                i += BATCH_SIZE
+            done = False
+            i = 0
+            while not done:
+                X_batch, y_batch, done = batchLoader.load_batch()
 
                 history = model.train_on_batch(
-                    x=[X_train[i*BATCH_SIZE:(i+1)*BATCH_SIZE],
-                       X_train[i*BATCH_SIZE:(i+1)*BATCH_SIZE],
-                       X_train[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
+                    x=[X_batch,
+                       X_batch,
+                       X_batch
                        ],
-                    y=[y_train[i*BATCH_SIZE:(i+1)*BATCH_SIZE],
-                       y_train[i*BATCH_SIZE:(i+1)*BATCH_SIZE],
-                       y_train[i*BATCH_SIZE:(i+1)*BATCH_SIZE]
+                    y=[y_batch,
+                       y_batch,
+                       y_batch
                        ]
-                ) #validation_data=(X_cv, y_cv)
+                )
+                i += 1 #remove later
+                done = False if i < SAMPLES else True
+                #validation_data=(X_cv, y_cv)
                 #print("Model: {}".format(model.metrics_names))
                 #print("H: {}".format(history))
                 #print("HH: {}".format(history.history))
@@ -104,8 +100,7 @@ def crossvalidate_intrasession(fn_acc):
 
             train_accuracy_batch /= SAMPLES
             logging.info("Train-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(train_accuracy_batch))
-            print("BATCHSTEP-Accuracy of the current model on intra-sessions is: {:.3f} ".format(train_accuracy_batch))
-            print("NOBATCH-Accuracy of the current model on intra-sessions is: {:.3f} ".format(train_accuracy_nobatch))
+            print("Train-Accuracy of the current model on intra-sessions is: {:.3f} ".format(train_accuracy_batch))
 
 
             # logging.info("CV-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(test_accuracy))
@@ -124,4 +119,4 @@ def crossvalidate_intrasession(fn_acc):
 
 
 if __name__ == '__main__':
-    crossvalidate_intrasession(test_model_accuracy)
+    crossvalidate_intrasession()
