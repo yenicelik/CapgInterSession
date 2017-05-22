@@ -8,7 +8,7 @@ import numpy as np
 from config import *
 
 import logging
-# logging.basicConfig(filename='example.log', level=logging.DEBUG)
+logging.basicConfig(filename='example.log', level=logging.DEBUG)
 logging = logging.getLogger(__name__)
 
 class OddEvenImporter(object):

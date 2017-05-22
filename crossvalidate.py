@@ -33,10 +33,13 @@ def crossvalidate_intrasession():
 
     print("X_train: {}".format(X_train.shape))
     print("y_train: {}".format(y_train.shape))
+    print("sid_train: {}".format(sid_train.shape))
     print("X_cv: {}".format(X_cv.shape))
     print("y_cv: {}".format(y_cv.shape))
+    print("sid_cv: {}".format(sid_cv.shape))
     print("X_test: {}".format(X_test.shape))
     print("y_test: {}".format(y_test.shape))
+    print("sid_test: {}".format(sid_test.shape))
 
     #Prepare saver
     if parameter['SAVE_DIR']:
@@ -61,12 +64,10 @@ def crossvalidate_intrasession():
 
             SAMPLES = 100
 
-            ########
-            ## TEST_RUN with BATCH_RUN
-
             batchLoader = BatchLoader(
                 X=X_train,
                 y=y_train,
+                sids=sid_train,
                 batch_size=BATCH_SIZE,
                 shuffle=True
             )
@@ -78,15 +79,20 @@ def crossvalidate_intrasession():
             while not done:
                 X_batch, y_batch, done = batchLoader.load_batch()
 
+                # Invariant 1: There should always be 'NUM_STREAM' mini-batches within the batch
+                assert len(
+                    X_batch) == NUM_STREAMS, "Number of streams {} does not correspond to X_batch length {}".format(
+                    NUM_STREAMS, len(X_batch))
+                assert len(y_batch) == len(X_batch), "ybatch and Xbatch do not correspond in size"
+                for i in range(len(X_batch)):
+                    assert len(X_batch) == len(
+                        y_batch), "There was an error while matching batches X " + X_batch.shape + " and y " + y_batch.shape
+                    assert len(X_batch) > 0, "One X_batch is empty!!"
+
+                #Problem is really evaluation of individual points
                 history = model.train_on_batch(
-                    x=[X_batch,
-                       X_batch,
-                       X_batch
-                       ],
-                    y=[y_batch,
-                       y_batch,
-                       y_batch
-                       ]
+                    x=[x for x in X_batch],
+                    y=[y for y in y_batch]
                 )
                 i += 1 #remove later
                 done = False if i < SAMPLES else True

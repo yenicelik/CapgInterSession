@@ -13,20 +13,17 @@ class BatchLoader(object):
 
     def __init__(self, X, y, sids, batch_size, shuffle):
         logging.debug("-> {} function".format(self.__init__.__name__))
-        self.no_of_batches = X.shape[0] / batch_size
         self.batch_counter = 0
         self.samples = X.shape[0]
         self.batch_size = batch_size
-
-        if self.no_of_batches * batch_size != X.shape[0]:
-            logging.error("The data {} is not divisible by the batch_size {} ({} batches)!".format(X.shape[0], batch_size, self.no_of_batches))
-            sys.exit(69)
+        self.no_of_batches = X.shape[0] / batch_size if X.shape[0] % batch_size == 0 else X.shape[0] / batch_size + 1
 
         oldshape = X.shape
         if shuffle:
             logging.debug("Shuffling dataset")
             indices = np.arange(X.shape[0])
             np.random.shuffle(indices)
+            print("Shuffle indices is: {}".format(indices.flatten()))
             X = X[indices]
             y = y[indices]
             sids = sids[indices]
@@ -34,50 +31,75 @@ class BatchLoader(object):
         #Making sure shuffled shape is equivalent to old shape
         if oldshape != X.shape:
             logging.error("Shuffle has changed the shape!")
+            sys.exit(69)
+
+        #Turning vectors into 16x8 images
+        X = np.reshape(X, (-1, 16, 8))  # should move this segment to some less performance-taking segment
 
         logging.debug("X has shape: {}".format(X.shape))
         logging.debug("y has shape: {}".format(y.shape))
-        logging.info("There are {} batches, each of size {}".format(self.no_of_batches, batch_size))
 
-        X_arr = np.split(X, self.no_of_batches, axis=0)
-        y_arr = np.split(y, self.no_of_batches, axis=0)
-        sid_arr = np.split(sids, self.no_of_batches, axis=0)
+        X_arr = np.array_split(X, self.no_of_batches, axis=0) #this does not need to result in equal division. Check for a function that is ok with that...
+        y_arr = np.array_split(y, self.no_of_batches, axis=0)
+        sid_arr = np.array_split(sids, self.no_of_batches, axis=0)
+
+        for i in range(len(X_arr)):
+            assert X_arr[i].shape[0] == y_arr[i].shape[0] and y_arr[i].shape[0] == sid_arr[i].shape[0], "Element of X_arr {} y_arr {} sid_arr {} are of different shapes ".format(X_arr[i].shape[0], y_arr[i].shape[0], sid_arr[i].shape[0])
+            assert X_arr[i].shape[0] != 0, "The batch is empty! {} for iter {} ".format(X_arr[i], i)
+            if X_arr[i].shape[0] < 50:
+                print("X_arr {} has less thne 50 samples! {}".format(X_arr[i].shape[0]))
+        assert len(X_arr) == len(y_arr) and len(y_arr) == len(sid_arr), "X_arr {} y_arr {} sid_arr {} have different sizes ".format(len(X_arr), len(y_arr), len(sid_arr))
+        assert len(X_arr) != 0, "No batches found at all! {}".format(X_arr.shape)
+        #TODO: turn those assertions into log.errors!
 
         X_batches = []
         y_batches = []
         sid_batches = []
 
-        for i in range(self.no_of_batches):
+        for i in range(len(X_arr)):
+            #Sort inner batch to later extract session-homogenous data
+            sort_indecies = np.argsort(sid_arr[i])
+            tmp_sid = sid_arr[i][sort_indecies]
+            tmp_X = X_arr[i][sort_indecies]
+            tmp_y = y_arr[i][sort_indecies]
 
-            #TODO: we must shuffle these values first, before we go ahead and 
-            indices = np.argsort(sid_arr)
-            X_streams = X_streams[indices]
-            y_streams = y_streams[indices]
-            sid_streams = sid_streams[indices]
+            #Get the indices at which slicing should occur
+            diff = tmp_sid - np.roll(tmp_sid, -1)
+            split_indices = np.nonzero(diff)[0] #because we want nonzero in the direction/axis=0 (and the indices are shifted by one!
+            split_indices += 1 #because the individual difference are 'shifted'
+            split_indices = split_indices[:-1] #because the last element will be empty when array_split is applied (this occurs because np.roll is rotationary)
 
-            #now split them into streamable batches
-            split_indices = np.forgot_function_name(sid_arr[indices]) #TODO: fill out this function
-            X_streams = np.split(X_arr[i], split_indices, axis=0)
-            y_streams = np.split(y_arr[i], split_indices, axis=0)
-            sid_streams = np.split(sid_arr[i], split_indices, axis=0)
+            #Apply split to each individual stream object
+            X_streams = np.array_split(tmp_X, split_indices, axis=0)
+            y_streams = np.array_split(tmp_y, split_indices, axis=0)
+            sid_streams = np.array_split(tmp_sid, split_indices, axis=0)
 
             #Checks side condition:
-            assert sid_streams == sid_streams[0], "sid_streams is not purely of one session! :: {} but got outlier {}".format(sid_streams[0], np.forgot_function_name(sid_streams))
+            for sid_element in sid_streams:
+                assert np.all(sid_element == sid_element[0]), "sid_streams is not purely of one session! :: {} but got outlier {}".format(sid_element[0], sid_element)
 
-            #and shuffle them
+
             shuffle_batch_indecises = np.arange(len(X_streams))
-            #Sorry, found no better way in pure python..
-            #But let's try this out first
-            X_streams = X_streams[shuffle_batch_indecises] #TODO: this is python, not numpy; is there a simple python compatible way?
-            y_streams = y_streams[shuffle_batch_indecises]
-            sid_streams = sid_streams[shuffle_batch_indecises]
+            np.random.shuffle(shuffle_batch_indecises)
+            X_streams = [X_streams[j] for j in shuffle_batch_indecises]
+            y_streams = [y_streams[j] for j in shuffle_batch_indecises]     #y_streams[shuffle_batch_indecises]
+            sid_streams = [sid_streams[j] for j in shuffle_batch_indecises] #sid_streams[shuffle_batch_indecises]
 
-            #Add an overflow operator, and append it to X_batches etc. immediately
-            #Add an underflow operator, and fill places by breaking ties - split the biggest element into two (repeat until length is enough
+            # Checks side condition:
+            for sid_element in sid_streams:
+                assert np.all(sid_element == sid_element[
+                    0]), "sid_streams is not purely of one session AFTER STREAMSHUFFLE! :: {} but got outlier {}".format(sid_element[0], sid_element)
+
 
             #TODO: error check!!
 
-            if len(X_streams) > NUM_STREAMS:
+            i = 0
+            while len(X_streams) > NUM_STREAMS:
+                i += 1
+                if i > 1000:
+                    print("Loop fucked up! at len(X_streams) > (GE) NUM_STREAMS")
+                    sys.exit(69)
+                #We don't have to shuffle through this structure, as the number of users is always less than 20! (any a split of NUM_STREAMS, which is 10, doesn't make this worse!)
                 X_batches.append(X_streams[:NUM_STREAMS])
                 X_streams = X_streams[NUM_STREAMS:]
                 y_batches.append(y_streams[:NUM_STREAMS])
@@ -86,14 +108,26 @@ class BatchLoader(object):
                 sid_streams = sid_streams[NUM_STREAMS:]
                 self.no_of_batches += 1
 
-            if len(X_streams) < NUM_STREAMS:
-                diff = NUM_STREAMS - len(X_streams)
-                #TODO: check input streams!
-                for i in range(diff):
-                    longest_i = max(len(stream) for stream in X_streams)
-                    tmp_Xs = np.split(X_streams[longest_i], 2, axis=0)
-                    X_streams.pop(longest_i)
-                    X_streams.extend(tmp_Xs, axis=0)
+            i=0
+            while len(X_streams) < NUM_STREAMS:
+                i += 1
+                if i > 1000:
+                    print("Loop fucked up! at len(X_streams) < (LE) NUM_STREAMS")
+                    sys.exit(69)
+                longest_i = np.argmax([stream.shape[0] for stream in X_streams]) #minus one; because 'len()' is offset by 1
+                tmp_Xs = np.array_split(X_streams[longest_i], 2, axis=0)
+                tmp_ys = np.array_split(y_streams[longest_i], 2, axis=0)
+                tmp_sid = np.array_split(sid_streams[longest_i], 2, axis=0)
+
+                #Pop the biggest element
+                X_streams.pop(longest_i)
+                y_streams.pop(longest_i)
+                sid_streams.pop(longest_i)
+
+                #Extend the two new elements
+                X_streams.extend(tmp_Xs)
+                y_streams.extend(tmp_ys)
+                sid_streams.extend(tmp_sid)
 
             X_batches.append(X_streams)
             y_batches.append(y_streams)
@@ -103,27 +137,6 @@ class BatchLoader(object):
         self.y_batches = y_batches
         self.sid_batches = sid_batches
 
-
-        sys.exit(69)
-
-        # TODO: Sort by index
-        # TODO: move all the sorting etc into the initializer function above.
-        # Create batches:
-        #   - that consist of streams
-        #   - side condition: each stream is purely one session
-
-        # TODO: Split up data into
-        # TODO: split up data by streams, o
-        # TODO: we must ensure the following:
-        #   - We have M streams
-        #   - All streams are filled with at least **one** value
-        #   - We must shuffle the training number
-        #   - We can sort and redistribute those session-data depending on:
-        #       - whether all corresponding streams are full?
-        #       - whether all streams have session-data from exactly one session
-        # What happens if the stream includes more sessions than NUM_STREAMS
-        # -> potentially have an overflow dataset consisting of X_overflow; y_overflow etc.
-
         logging.debug("<- {} function".format(self.__init__.__name__))
 
 
@@ -132,8 +145,8 @@ class BatchLoader(object):
         """
         :return: A (random) batch of X with the corresponding labels y, and a signal wether one epoch has passed
         """
-        outX = self.X_arr[self.batch_counter]
-        outy = self.y_arr[self.batch_counter]
+        outX = self.X_batches[self.batch_counter]
+        outy = self.y_batches[self.batch_counter]
         epoch_passed = False
         self.batch_counter += 1
 

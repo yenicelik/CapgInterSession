@@ -16,8 +16,7 @@ class InterSessionImporter(object):
         filepaths = self.get_filepaths_in_directory(data_parent_dir)
         data = self.get_data_from_filepaths(filepaths)
 
-        X, y, sids = self.get_train_cv_test_given_sid(data)
-        X = np.reshape(X, (-1, 16, 8))
+        X, y, sids = self.get_X_y_sid_from_data(data)
 
         self.X = X
         self.y = y
@@ -25,10 +24,12 @@ class InterSessionImporter(object):
 
     #TODO: check in the paper how training data is really provided to the algorithm
     def get_train_cv_test_given_sid(self, sid, cv_size=0.4, shuffle=True):
-        assert sid < 18, "There are only 18 possible subjects to choose from! :: {}".format(sid)
-        cv_split = self.X.shape[0] * cv_size
-        train_indices = (self.sids != sid)
-        test_indices = (self.sids == sid)
+        assert sid < 18, "Only 18 possible subjects left!"
+
+        train_indices = np.arange(self.X.shape[0]) #wtf, so we have a dismatch between sid's and X's?
+        test_indices = np.arange(self.X.shape[0])
+        train_indices = train_indices[(self.sids != sid).flatten()]
+        test_indices = test_indices[(self.sids == sid).flatten()]
 
         if shuffle:
             np.random.shuffle(train_indices)
@@ -39,57 +40,18 @@ class InterSessionImporter(object):
         y_train = self.y[train_indices]
         sid_train = self.sids[train_indices]
 
-        #Get cv and test sets
-        X_cv = self.X[train_indices[:cv_split]]
-        y_cv = self.y[train_indices[:cv_split]]
-        sid_cv = self.sids[train_indices[:cv_split]]
 
-        X_test = self.X[train_indices[cv_split:]]
-        y_test = self.y[train_indices[cv_split:]]
-        sid_test = self.sids[train_indices[cv_split:]]
+        #Get cv and test sets
+        cv_split = int(len(test_indices) * cv_size)
+        X_cv = self.X[test_indices[:cv_split]]
+        y_cv = self.y[test_indices[:cv_split]]
+        sid_cv = self.sids[test_indices[:cv_split]]
+
+        X_test = self.X[test_indices[cv_split:]]
+        y_test = self.y[test_indices[cv_split:]]
+        sid_test = self.sids[test_indices[cv_split:]]
 
         return X_train, y_train, sid_train, X_cv, y_cv, sid_cv, X_test, y_test, sid_test
-
-
-    def get_train_cv_test(self, shuffle=True):
-        ##TRAINING SET
-        X_train = np.reshape(self.X_odd, (-1, 1000, 16, 8))
-        y_train = np.reshape(self.y_odd, (-1, 1000, NUM_GESTURES))
-        n = X_train.shape[0]
-
-        indices = np.arange(n)
-        if shuffle:
-            np.random.shuffle(indices)
-
-        X_train = X_train[indices]
-        X_train = np.reshape(X_train, (-1, 16, 8))
-        y_train = y_train[indices]
-        y_train = np.reshape(y_train, (-1, NUM_GESTURES))
-
-
-        #CV AND TEST SET
-        X_dev = np.reshape(self.X_even, (-1, 1000, 16, 8))
-        y_dev = np.reshape(self.y_even, (-1, 1000, NUM_GESTURES))
-        n = X_dev.shape[0]
-
-        indices = np.arange(n)
-        if shuffle:
-            np.random.shuffle(indices)
-
-        test_ind, cv_ind = np.split(indices, 2)
-
-        X_cv = X_dev[cv_ind,:]
-        X_cv = np.reshape(X_cv, (-1, 16, 8))
-        y_cv = y_dev[cv_ind,:]
-        y_cv = np.reshape(y_cv, (-1, NUM_GESTURES))
-
-        X_test = X_dev[test_ind,:]
-        X_test = np.reshape(X_test, (-1, 16, 8))
-        y_test = y_dev[test_ind,:]
-        y_test = np.reshape(y_test, (-1, NUM_GESTURES))
-
-        return X_train, y_train, X_cv, y_cv, X_test, y_test
-
 
 
     def get_filepaths_in_directory(self, parent_directory):
@@ -114,7 +76,11 @@ class InterSessionImporter(object):
 
         out = []
         for filepath in filepaths:
-            filedata = sio.loadmat(filepath)
+            try:
+                filedata = sio.loadmat(filepath)
+            except Exception as e:
+                print("sio loadmat failed for filepath: {}; with exit message {}".format(filepath, e))
+                sys.exit(69)
             out.append(filedata)
 
         return out
@@ -137,10 +103,13 @@ class InterSessionImporter(object):
             elif gesture == 100 or gesture == 101:
                 continue
             y = np.zeros((X.shape[0], NUM_GESTURES)) #10 dimensions in one-hot setting
+            cur_sids = np.zeros((X.shape[0], 1))
             y[:,gesture-1] = 1
+            cur_sids[:] = sid
+
             #splitting array now again, feeling a little unconfident here, as off-by-one error are critical
             ys.append(y)
             Xs.append(X)
-            sids.append(sid)
+            sids.append(cur_sids)
 
-        return np.concatenate(Xs, axis=0), np.concatenate(ys, axis=0), np.concatenate(sids, axis=0)
+        return np.concatenate(Xs, axis=0), np.concatenate(ys, axis=0), np.concatenate(sids, axis=0).flatten()
