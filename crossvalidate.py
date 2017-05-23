@@ -56,14 +56,41 @@ def crossvalidate_intrasession():
         model = init_graph()
         model.summary()
 
-        for e in range(parameter['NUM_EPOCHS']):
-            nlr = adapt_lr(e, parameter['LEARNING_RATE'])
-            model.optimizer.lr.assign(nlr)
-            logging.info("Epoch {} with lr {:.3f}".format(e, nlr))
-            print("Epoch {} with lr {:.3f}".format(e, nlr))
+        dev = True
 
-            SAMPLES = 100
+        if dev:
+            devsize = 1000
+            devindex = np.arange(min(X_test.shape[0], X_cv.shape[0], X_train.shape[0]))
 
+
+            print("Unique indecies are: {}".format(np.unique(sid_train[devindex[:devsize]])))
+            np.random.shuffle(devindex)
+            #We can also put this shit into the loop for repeated shuffling
+            batchLoader = BatchLoader(
+                X=X_train[devindex[:devsize]],
+                y=y_train[devindex[:devsize]],
+                sids=sid_train[devindex[:devsize]],
+                batch_size=BATCH_SIZE,
+                shuffle=True
+            )
+
+            testLoader = BatchLoader(
+               X=X_test[devindex[:devsize]],
+               y=y_test[devindex[:devsize]],
+               sids=sid_test[devindex[:devsize]],
+               batch_size=BATCH_SIZE,
+               shuffle=True
+            )
+            cvLoader = BatchLoader(
+                   X=X_cv[devindex[:devsize]],
+                   y=y_cv[devindex[:devsize]],
+                   sids=sid_cv[devindex[:devsize]],
+                   batch_size=BATCH_SIZE,
+                   shuffle=True
+            )
+
+        else:
+            # We can also put this shit into the loop for repeated shuffling
             batchLoader = BatchLoader(
                 X=X_train,
                 y=y_train,
@@ -72,12 +99,45 @@ def crossvalidate_intrasession():
                 shuffle=True
             )
 
+
+            #TODO: batchLoader for test and cv must be different! (just naive input of batch_sized' samples!
+            testLoader = BatchLoader(
+                X=X_test,
+                y=y_test,
+                sids=sid_test,
+                batch_size=BATCH_SIZE,
+                shuffle=True
+            )
+
+            cvLoader = BatchLoader(
+                X=X_cv,
+                y=y_cv,
+                sids=sid_cv,
+                batch_size=BATCH_SIZE,
+                shuffle=True
+            )
+
+
+
+
+        for e in range(parameter['NUM_EPOCHS']):
+            nlr = adapt_lr(e, parameter['LEARNING_RATE'])
+            model.optimizer.lr.assign(nlr)
+            logging.info("Epoch {} with lr {:.3f}".format(e, nlr))
+            print("Epoch {} with lr {:.3f}".format(e, nlr))
+
             train_accuracy_batch = 0.0
 
             done = False
-            i = 0
+            move_tester = 0
             while not done:
+                move_tester += 1
+                print("Train move_tester is at: ", move_tester)
                 X_batch, y_batch, done = batchLoader.load_batch()
+
+                print("X_batch: ", len(X_batch))
+                print("X_batch sample: ", X_batch[0].shape)
+                print("y_batch sample: ", y_batch[0].shape)
 
                 # Invariant 1: There should always be 'NUM_STREAM' mini-batches within the batch
                 assert len(
@@ -94,34 +154,61 @@ def crossvalidate_intrasession():
                     x=[x for x in X_batch],
                     y=[y for y in y_batch]
                 )
-                i += 1 #remove later
-                done = False if i < SAMPLES else True
-                #validation_data=(X_cv, y_cv)
-                #print("Model: {}".format(model.metrics_names))
-                #print("H: {}".format(history))
-                #print("HH: {}".format(history.history))
-
-                #TODO: must take average over all batches then!
-                train_accuracy_batch += (history[-1] + history[-2] + history[-3]) / 3
-
-            train_accuracy_batch /= SAMPLES
-            logging.info("Train-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(train_accuracy_batch))
-            print("Train-Accuracy of the current model on intra-sessions is: {:.3f} ".format(train_accuracy_batch))
 
 
-            # logging.info("CV-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(test_accuracy))
-            # print("Accuracy of the current model on intra-sessions is: {:.3f} percent ".format(test_accuracy))
 
-            model.save(os.path.join(parameter['SAVE_DIR'], RUN_NAME + '.h5'))
-            logging.debug("Saved model")
+            done_cv = False
+            while not done_cv:
+                X_batch, y_batch, done_cv = cvLoader.load_batch()
 
-        final_accuracy = model.evaluate(X_test, y_test, batch_size=BATCH_SIZE)[-1]
+                # Invariant 1: There should always be 'NUM_STREAM' mini-batches within the batch
+                assert len(
+                    X_batch) == NUM_STREAMS, "Number of streams {} does not correspond to X_batch length {}".format(
+                    NUM_STREAMS, len(X_batch))
+                assert len(y_batch) == len(X_batch), "ybatch and Xbatch do not correspond in size"
+                for i in range(len(X_batch)):
+                    assert len(X_batch) == len(
+                        y_batch), "There was an error while matching batches X " + X_batch.shape + " and y " + y_batch.shape
+                    assert len(X_batch) > 0, "One X_batch is empty!!"
 
-        logging.info("Test-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(final_accuracy))
-        print("Test-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(final_accuracy))
+                    # Problem is really evaluation of individual points
+                    history = model.test_on_batch(
+                       x=[x for x in X_batch],
+                       y=[y for y in y_batch]
+                    )
+
+        #Final test of the model
+        done_test = False
+        while not done_test:
+            X_batch, y_batch, done_test = testLoader.load_batch()
+
+            # Invariant 1: There should always be 'NUM_STREAM' mini-batches within the batch
+            assert len(
+                X_batch) == NUM_STREAMS, "Number of streams {} does not correspond to X_batch length {}".format(
+                NUM_STREAMS, len(X_batch))
+            assert len(y_batch) == len(X_batch), "ybatch and Xbatch do not correspond in size"
+            for i in range(len(X_batch)):
+                assert len(X_batch) == len(
+                    y_batch), "There was an error while matching batches X " + X_batch.shape + " and y " + y_batch.shape
+                assert len(X_batch) > 0, "One X_batch is empty!!"
+
+                # Problem is really evaluation of individual points
+                history = model.test_on_batch(
+                   x=[x for x in X_batch],
+                   y=[y for y in y_batch]
+                )
+
+        logging.info("Train-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(train_accuracy_batch))
+        print("Train-Accuracy of the current model on intra-sessions is: {:.3f} ".format(train_accuracy_batch))
 
 
-    return final_accuracy
+        # logging.info("CV-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(test_accuracy))
+        # print("Accuracy of the current model on intra-sessions is: {:.3f} percent ".format(test_accuracy))
+
+        model.save(os.path.join(parameter['SAVE_DIR'], RUN_NAME + '.h5'))
+        logging.debug("Saved model")
+
+    return 0
 
 
 if __name__ == '__main__':
