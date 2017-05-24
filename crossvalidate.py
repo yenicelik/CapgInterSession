@@ -7,6 +7,7 @@ from datahandler.BatchLoader import BatchLoader
 from keras.models import load_model
 from config import *
 from accuracy import *
+import numpy as np
 
 import os
 import json
@@ -30,6 +31,7 @@ def crossvalidate_intrasession():
     X_train, y_train, sid_train,\
     X_cv, y_cv, sid_cv,\
     X_test, y_test, sid_test = importer.get_train_cv_test_given_sid(sid=8)
+
 
     print("X_train: {}".format(X_train.shape))
     print("y_train: {}".format(y_train.shape))
@@ -56,10 +58,10 @@ def crossvalidate_intrasession():
         model = init_graph()
         model.summary()
 
-        dev = False
+        dev = True
 
         if dev:
-            devsize = 1000
+            devsize = 10000
             devindex = np.arange(min(X_test.shape[0], X_cv.shape[0], X_train.shape[0]))
 
             np.random.shuffle(devindex)
@@ -161,6 +163,12 @@ def crossvalidate_intrasession():
             ######################
             ## CROSS-VALIDATE MODEL
             ######################
+            #First, make sure running average is adapted to the validation data
+            model.evaluate(
+                [np.reshape(X_cv, (-1, 16, NUM_GESTURES)) for i in range(NUM_STREAMS)],
+                [np.reshape(y_cv, (-1, NUM_GESTURES)) for i in range(NUM_STREAMS)],
+                batch_size=BATCH_SIZE, verbose=1, sample_weight=None)
+
             done_cv = False
             cv_acc_list = []
             while not done_cv:
