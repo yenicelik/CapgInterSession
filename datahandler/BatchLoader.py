@@ -13,11 +13,14 @@ logging = logging.getLogger(__name__)
 class BatchLoader(object):
 
     def __init__(self, X, y, sids, batch_size, shuffle):
-        logging.debug("-> {} function".format(self.__init__.__name__))
+
         self.batch_counter = 0
         self.samples = X.shape[0]
         self.batch_size = batch_size
         self.no_of_batches = 0 #X.shape[0] / batch_size if X.shape[0] % batch_size == 0 else X.shape[0] / batch_size + 1
+
+        # TODO: implement an assertion: we get a 'outX = self.X_batches[self.batch_counter] :: IndexError: list index out of range' error if the batch_size is not big enoug!
+
 
         oldshape = X.shape
         if shuffle:

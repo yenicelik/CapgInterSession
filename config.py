@@ -1,4 +1,4 @@
 NUM_GESTURES = 8
-BATCH_SIZE = 10 #1000
-NUM_STREAMS = 4
-RUN_NAME = 'intersession-teststream-BS100'
+BATCH_SIZE = 100 #1000
+NUM_STREAMS = 10
+RUN_NAME = 'intersession-streams-BS100-NS10-testtrain=Incorrect'

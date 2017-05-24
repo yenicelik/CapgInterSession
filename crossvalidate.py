@@ -56,14 +56,12 @@ def crossvalidate_intrasession():
         model = init_graph()
         model.summary()
 
-        dev = True
+        dev = False
 
         if dev:
             devsize = 1000
             devindex = np.arange(min(X_test.shape[0], X_cv.shape[0], X_train.shape[0]))
 
-
-            print("Unique indecies are: {}".format(np.unique(sid_train[devindex[:devsize]])))
             np.random.shuffle(devindex)
             #We can also put this shit into the loop for repeated shuffling
             batchLoader = BatchLoader(
@@ -101,6 +99,7 @@ def crossvalidate_intrasession():
 
 
             #TODO: batchLoader for test and cv must be different! (just naive input of batch_sized' samples!
+            # TODO: the recognition phase works differently than the training phase
             testLoader = BatchLoader(
                 X=X_test,
                 y=y_test,
@@ -118,26 +117,23 @@ def crossvalidate_intrasession():
             )
 
 
-
+        ######################
+        ## STARTING EPOCHS
+        ######################
 
         for e in range(parameter['NUM_EPOCHS']):
             nlr = adapt_lr(e, parameter['LEARNING_RATE'])
             model.optimizer.lr.assign(nlr)
             logging.info("Epoch {} with lr {:.3f}".format(e, nlr))
-            print("Epoch {} with lr {:.3f}".format(e, nlr))
+            print("\nEpoch {} with lr {:.3f}".format(e, nlr))
 
-            train_accuracy_batch = 0.0
-
+            ######################
+            ## TRAIN MODEL
+            ######################
             done = False
-            move_tester = 0
+            train_acc_list = []
             while not done:
-                move_tester += 1
-                print("Train move_tester is at: ", move_tester)
                 X_batch, y_batch, done = batchLoader.load_batch()
-
-                print("X_batch: ", len(X_batch))
-                print("X_batch sample: ", X_batch[0].shape)
-                print("y_batch sample: ", y_batch[0].shape)
 
                 # Invariant 1: There should always be 'NUM_STREAM' mini-batches within the batch
                 assert len(
@@ -155,9 +151,18 @@ def crossvalidate_intrasession():
                     y=[y for y in y_batch]
                 )
 
+                train_accuracy_batch = sum(history[-NUM_STREAMS:])/NUM_STREAMS
+                train_acc_list.append(train_accuracy_batch)
+
+            print("Train accuracy is: {:.3f}".format(sum(train_acc_list) / float(len(train_acc_list))))
+            logging.warning("Train accuracy is: {:.3f}".format(sum(train_acc_list) / float(len(train_acc_list))))
 
 
+            ######################
+            ## CROSS-VALIDATE MODEL
+            ######################
             done_cv = False
+            cv_acc_list = []
             while not done_cv:
                 X_batch, y_batch, done_cv = cvLoader.load_batch()
 
@@ -171,14 +176,31 @@ def crossvalidate_intrasession():
                         y_batch), "There was an error while matching batches X " + X_batch.shape + " and y " + y_batch.shape
                     assert len(X_batch) > 0, "One X_batch is empty!!"
 
-                    # Problem is really evaluation of individual points
-                    history = model.test_on_batch(
-                       x=[x for x in X_batch],
-                       y=[y for y in y_batch]
-                    )
+                # Problem is really evaluation of individual points
+                history = model.test_on_batch(
+                   x=[x for x in X_batch],
+                   y=[y for y in y_batch]
+                )
 
-        #Final test of the model
+                cv_accuracy_batch = sum(history[-NUM_STREAMS:]) / NUM_STREAMS
+                cv_acc_list.append(cv_accuracy_batch)
+
+            print("CV accuracy is: {:.3f}".format(sum(cv_acc_list) / float(len(cv_acc_list))))
+            logging.warning("CV accuracy is: {:.3f}".format(sum(cv_acc_list) / float(len(cv_acc_list))))
+
+            model.save(os.path.join(parameter['SAVE_DIR'], RUN_NAME + '.h5'))
+            logging.debug("Saved model")
+
+
+        ######################
+        ## ALL EPOCHS DONE
+        ######################
+
+        ######################
+        ## TEST/EVALUATE MODEL
+        ######################
         done_test = False
+        test_acc_list = []
         while not done_test:
             X_batch, y_batch, done_test = testLoader.load_batch()
 
@@ -193,17 +215,16 @@ def crossvalidate_intrasession():
                 assert len(X_batch) > 0, "One X_batch is empty!!"
 
                 # Problem is really evaluation of individual points
-                history = model.test_on_batch(
-                   x=[x for x in X_batch],
-                   y=[y for y in y_batch]
-                )
+            history = model.test_on_batch(
+               x=[x for x in X_batch],
+               y=[y for y in y_batch]
+            )
 
-        logging.info("Train-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(train_accuracy_batch))
-        print("Train-Accuracy of the current model on intra-sessions is: {:.3f} ".format(train_accuracy_batch))
+            test_accuracy_batch = sum(history[-NUM_STREAMS:]) / NUM_STREAMS
+            test_acc_list.append(test_accuracy_batch)
 
-
-        # logging.info("CV-Accuracy of the current model on intra-sessions is: {:.3f}% ".format(test_accuracy))
-        # print("Accuracy of the current model on intra-sessions is: {:.3f} percent ".format(test_accuracy))
+        print("Test accuracy is: {:.3f}".format(sum(test_acc_list) / float(len(test_acc_list))))
+        logging.warning("Test accuracy is: {:.3f}".format(sum(test_acc_list) / float(len(test_acc_list))))
 
         model.save(os.path.join(parameter['SAVE_DIR'], RUN_NAME + '.h5'))
         logging.debug("Saved model")
